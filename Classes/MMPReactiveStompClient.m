@@ -69,10 +69,18 @@
 
 @interface MMPStompSubscription()
 
-@property (nonatomic, strong) RACSignal *signal;
+@property (nonatomic, strong) MMPReactiveStompClient *client;
 
-- (id)initWithSignal:(RACSignal *)signal;
+- (id)initWithClient:(MMPReactiveStompClient *)client
+          identifier:(NSString *)identifier;
 - (void)unsubscribe;
+
+@end
+
+@interface MMPStompSubscriptionMetadata : NSObject
+
+@property (nonatomic, strong) MMPStompSubscription *subscription;
+@property (nonatomic, strong) RACSignal *signal;
 
 @end
 
@@ -98,7 +106,6 @@
 {
     if (self = [super init]) {
         self.socket = [[SRWebSocket alloc] initWithURL:url];
-        self.subscriptions = [NSMutableDictionary dictionary];
         _socket.delegate = self;
         self.socketSubject = nil;
     }
@@ -107,6 +114,7 @@
 
 - (RACSignal *)open
 {
+    self.subscriptions = [NSMutableDictionary dictionary];
     self.socketSubject = [RACSubject subject];
     idGenerator = 0;
     [_socket open];
@@ -154,12 +162,14 @@
 
 - (RACSignal *)stompMessagesFromDestination:(NSString *)destination
 {
-    RACSignal *subscription = nil;
+    MMPStompSubscriptionMetadata *subscription = nil;
     
     // only 1 subscription (multicast) signal per destination
     @synchronized(_subscriptions) {
         subscription = [_subscriptions objectForKey:destination];
         if (!subscription) {
+            
+            subscription = [[MMPStompSubscriptionMetadata alloc] init];
             
             @weakify(self)
             
@@ -169,7 +179,7 @@
                 @strongify(self)
                 
                 MMPRxSC_LOG(@"Subscribing to STOMP destination: %@", destination)
-                [self subscribeTo:destination headers:nil];
+                subscription.subscription = [self subscribeTo:destination headers:nil];
                 
                 [[[self stompMessages]
                    // filter messages by destination
@@ -180,12 +190,13 @@
                    subscribe:subscriber];
                 
                 return [RACDisposable disposableWithBlock:^{
+                    
                 }];
                 
             }] publish];
             [mc connect];
             
-            subscription = mc.signal;
+            subscription.signal = mc.signal;
             [_subscriptions setObject:subscription forKey:destination];
 
         } else {
@@ -193,7 +204,7 @@
         }
     }
     
-    return subscription;
+    return subscription.signal;
 }
 
 #pragma mark Low-level STOMP operations
@@ -213,7 +224,7 @@
     [_socket send:[frame toString]];
 }
 
-- (void)subscribeTo:(NSString *)destination
+- (MMPStompSubscription *)subscribeTo:(NSString *)destination
             headers:(NSDictionary *)headers
 {
     NSMutableDictionary *subHeaders = [[NSMutableDictionary alloc] initWithDictionary:headers];
@@ -226,6 +237,7 @@
     [self sendFrameWithCommand:kCommandSubscribe
                        headers:subHeaders
                           body:nil];
+    return [[MMPStompSubscription alloc] initWithClient:self identifier:identifier];
 }
 
 #pragma mark SRWebSocketDelegate implementation
@@ -384,17 +396,27 @@
 
 @implementation MMPStompSubscription
 
-- (id)initWithSignal:(RACSignal *)signal
+- (id)initWithClient:(MMPReactiveStompClient *)client
+          identifier:(NSString *)identifier
 {
-    if (self = [super init]) {
-        self.signal = signal;
+    if(self = [super init]) {
+        _client = client;
+        _identifier = [identifier copy];
     }
     return self;
 }
 
-- (void)unsubscribe
-{
-    
+- (void)unsubscribe {
+    [self.client sendFrameWithCommand:kCommandUnsubscribe
+                              headers:@{kHeaderID: self.identifier}
+                                 body:nil];
 }
 
 @end
+
+@implementation MMPStompSubscriptionMetadata
+
+
+
+@end
+
