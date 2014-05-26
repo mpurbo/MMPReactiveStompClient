@@ -85,6 +85,9 @@
 @property (nonatomic, strong) SRWebSocket *socket;
 @property (nonatomic, strong) RACSubject *socketSubject;
 
+// multicast for each destination
+@property (nonatomic, strong) NSMutableDictionary *subscriptions;
+
 @end
 
 #pragma mark - STOMP client's privates
@@ -95,6 +98,7 @@
 {
     if (self = [super init]) {
         self.socket = [[SRWebSocket alloc] initWithURL:url];
+        self.subscriptions = [NSMutableDictionary dictionary];
         _socket.delegate = self;
         self.socketSubject = nil;
     }
@@ -150,38 +154,46 @@
 
 - (RACSignal *)stompMessagesFromDestination:(NSString *)destination
 {
-    @weakify(self)
+    RACSignal *subscription = nil;
     
-    // TODO: need to do something to make sure to start subscribing when
-    // the socket is opened, possibly using some subject trickery
-    [self subscribeTo:destination headers:nil];
+    // only 1 subscription (multicast) signal per destination
+    @synchronized(_subscriptions) {
+        subscription = [_subscriptions objectForKey:destination];
+        if (!subscription) {
+            
+            @weakify(self)
+            
+            // create signal as multicast so the side-effect is only executed once
+            RACMulticastConnection *mc = [[RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
+                
+                @strongify(self)
+                
+                MMPRxSC_LOG(@"Subscribing to STOMP destination: %@", destination)
+                [self subscribeTo:destination headers:nil];
+                
+                [[[self stompMessages]
+                   // filter messages by destination
+                   filter:^BOOL(MMPStompMessage *message) {
+                       return [destination isEqualToString:[message.headers objectForKey:kHeaderDestination]];
+                   }]
+                   // basically just pass along all signals
+                   subscribe:subscriber];
+                
+                return [RACDisposable disposableWithBlock:^{
+                }];
+                
+            }] publish];
+            [mc connect];
+            
+            subscription = mc.signal;
+            [_subscriptions setObject:subscription forKey:destination];
+
+        } else {
+            MMPRxSC_LOG(@"Previously subscribed to STOMP destination: %@, reusing signal.", destination)
+        }
+    }
     
-    return [RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-        
-        @strongify(self)
-        
-        RACSubject *unsubscribeSubject = [RACSubject subject];
-        
-        [[[[self stompMessages]
-            // filter messages by destination
-            filter:^BOOL(MMPStompMessage *message) {
-                return [destination isEqualToString:[message.headers objectForKey:kHeaderDestination]];
-            }]
-            // until the subscriber is disposed (see returned RACDisposable below)
-            takeUntil:unsubscribeSubject]
-            // basically just pass along all signals
-            subscribeNext:^(MMPStompMessage *message) {
-                [subscriber sendNext:message];
-            } error:^(NSError *error) {
-                [subscriber sendError:error];
-            } completed:^{
-                [subscriber sendCompleted];
-            }];
-        
-        return [RACDisposable disposableWithBlock:^{
-            [unsubscribeSubject sendCompleted];
-        }];
-    }];
+    return subscription;
 }
 
 #pragma mark Low-level STOMP operations
