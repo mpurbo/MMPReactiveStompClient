@@ -70,17 +70,11 @@
 @interface MMPStompSubscription()
 
 @property (nonatomic, strong) MMPReactiveStompClient *client;
+@property (nonatomic, assign) NSUInteger subscribers;
 
 - (id)initWithClient:(MMPReactiveStompClient *)client
           identifier:(NSString *)identifier;
 - (void)unsubscribe;
-
-@end
-
-@interface MMPStompSubscriptionMetadata : NSObject
-
-@property (nonatomic, strong) MMPStompSubscription *subscription;
-@property (nonatomic, strong) RACSignal *signal;
 
 @end
 
@@ -91,9 +85,9 @@
 }
 
 @property (nonatomic, strong) SRWebSocket *socket;
-@property (nonatomic, strong) RACSubject *socketSubject;
+@property (atomic, strong) RACSubject *socketSubject;
 
-// multicast for each destination
+// MMPStompSubscription object for each destination
 @property (nonatomic, strong) NSMutableDictionary *subscriptions;
 
 @end
@@ -118,7 +112,7 @@
     self.socketSubject = [RACSubject subject];
     idGenerator = 0;
     [_socket open];
-    return _socketSubject;
+    return self.socketSubject;
 }
 
 - (void)close
@@ -128,12 +122,12 @@
 
 - (RACSignal *)webSocketData
 {
-    return _socketSubject;
+    return self.socketSubject;
 }
 
 - (RACSignal *)stompFrames
 {
-    return [[_socketSubject
+    return [[self.socketSubject
              filter:^BOOL(id value) {
                  // web socket "connected" event emits SRWebSocket object
                  // but we only interested in NSString so that it can be mapped
@@ -162,58 +156,70 @@
 
 - (RACSignal *)stompMessagesFromDestination:(NSString *)destination
 {
-    MMPStompSubscriptionMetadata *subscription = nil;
+    @weakify(self)
     
-    // only 1 subscription (multicast) signal per destination
-    @synchronized(_subscriptions) {
-        subscription = [_subscriptions objectForKey:destination];
-        if (!subscription) {
+    return [RACSignal
+        createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
             
-            subscription = [[MMPStompSubscriptionMetadata alloc] init];
+            @strongify(self)
             
-            @weakify(self)
+            // subscribe to STOMP destination if necessary
+            @synchronized(_subscriptions) {
+                MMPStompSubscription *subscription = [_subscriptions objectForKey:destination];
+                if (!subscription) {
+                    MMPRxSC_LOG(@"Subscribing to STOMP destination: %@", destination)
+                    subscription = [self subscribeTo:destination headers:nil];
+                    [_subscriptions setObject:subscription forKey:destination];
+                } else {
+                    MMPRxSC_LOG(@"%d subscribed to STOMP destination: %@", subscription.subscribers, destination)
+                }
+                subscription.subscribers++;
+            }
             
-            // create signal as multicast so the side-effect is only executed once
-            RACMulticastConnection *mc = [[RACSignal createSignal:^RACDisposable *(id<RACSubscriber> subscriber) {
-                
-                @strongify(self)
-                
-                MMPRxSC_LOG(@"Subscribing to STOMP destination: %@", destination)
-                subscription.subscription = [self subscribeTo:destination headers:nil];
-                
-                [[[self stompMessages]
-                   // filter messages by destination
-                   filter:^BOOL(MMPStompMessage *message) {
-                       return [destination isEqualToString:[message.headers objectForKey:kHeaderDestination]];
-                   }]
-                   // basically just pass along all signals
-                   subscribe:subscriber];
-                
-                return [RACDisposable disposableWithBlock:^{
-                    
-                }];
-                
-            }] publish];
-            [mc connect];
+            [[[self stompMessages]
+              // filter messages by destination
+              filter:^BOOL(MMPStompMessage *message) {
+                  return [destination isEqualToString:[message.headers objectForKey:kHeaderDestination]];
+              }]
+              // basically just pass along filtered signals to subscriber
+              subscribe:subscriber];
             
-            subscription.signal = mc.signal;
-            [_subscriptions setObject:subscription forKey:destination];
-
-        } else {
-            MMPRxSC_LOG(@"Previously subscribed to STOMP destination: %@, reusing signal.", destination)
-        }
-    }
-    
-    return subscription.signal;
+            return [RACDisposable disposableWithBlock:^{
+                // unsubscribe from STOMP destination if there are no more subscribers
+                @synchronized(_subscriptions) {
+                    MMPStompSubscription *subscription = [_subscriptions objectForKey:destination];
+                    if (subscription) {
+                        subscription.subscribers--;
+                        if (subscription.subscribers <= 0) {
+                            MMPRxSC_LOG(@"Trying to unsubscribe from STOMP destination: %@", destination)
+                            if ([self socketStateValid]) {
+                                MMPRxSC_LOG(@"Unsubscribing STOMP destination: %@", destination)
+                                [subscription unsubscribe];
+                            }
+                            [_subscriptions removeObjectForKey:destination];
+                        } else {
+                            MMPRxSC_LOG(@"%d still subscribed to STOMP destination: %@", subscription.subscribers, destination)
+                        }
+                    } else {
+                        // shouldn't happen
+                    }
+                }
+            }];
+        }];
 }
 
 #pragma mark Low-level STOMP operations
+
+- (BOOL)socketStateValid
+{
+    return (self.socketSubject && _socket.readyState == SR_OPEN);
+}
 
 - (void)sendFrameWithCommand:(NSString *)command
                      headers:(NSDictionary *)headers
                         body:(NSString *)body
 {
-    if (!_socketSubject || _socket.readyState != SR_OPEN) {
+    if (![self socketStateValid]) {
         // invalid socket state
         NSLog(@"[ERROR] Socket is not opened");
         return;
@@ -245,26 +251,26 @@
 - (void)webSocket:(SRWebSocket *)webSocket didReceiveMessage:(id)message
 {
     MMPRxSC_LOG(@"received message: %@", message)
-    [_socketSubject sendNext:message];
+    [self.socketSubject sendNext:message];
 }
 
 - (void)webSocketDidOpen:(SRWebSocket *)webSocket
 {
     MMPRxSC_LOG(@"web socket opened")
-    [_socketSubject sendNext:webSocket];
+    [self.socketSubject sendNext:webSocket];
 }
 
 - (void)webSocket:(SRWebSocket *)webSocket didFailWithError:(NSError *)error
 {
     MMPRxSC_LOG(@"web socket failed: %@", error)
-    [_socketSubject sendError:error];
+    [self.socketSubject sendError:error];
     self.socketSubject = nil;
 }
 
 - (void)webSocket:(SRWebSocket *)webSocket didCloseWithCode:(NSInteger)code reason:(NSString *)reason wasClean:(BOOL)wasClean
 {
     MMPRxSC_LOG(@"web socket closed: code = %ld, reason = %@, clean ? %@", (long)code, reason, wasClean ? @"YES" : @"NO")
-    [_socketSubject sendCompleted];
+    [self.socketSubject sendCompleted];
     self.socketSubject = nil;
 }
 
@@ -402,6 +408,7 @@
     if(self = [super init]) {
         _client = client;
         _identifier = [identifier copy];
+        _subscribers = 0;
     }
     return self;
 }
@@ -411,12 +418,6 @@
                               headers:@{kHeaderID: self.identifier}
                                  body:nil];
 }
-
-@end
-
-@implementation MMPStompSubscriptionMetadata
-
-
 
 @end
 
