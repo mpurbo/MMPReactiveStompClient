@@ -2,7 +2,7 @@
 
 ## 0.1.1
 
-- Bug fix: 16-bit unichar formatted as 8-bit
+- Bug fix: 16-bit unichar formatted as 8-bit. Credit: Andrei Movila
 
 ## 0.1.0
 
