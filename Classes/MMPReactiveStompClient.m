@@ -321,8 +321,8 @@
 		if(hasHeaders) {
             for (int i=0; i < [line length]; i++) {
                 unichar c = [line characterAtIndex:i];
-                if (c != '\x00') {
-                    [body appendString:[NSString stringWithFormat:@"%c", c]];
+                if (c != 0x0000) {
+                    [body appendString:[NSString stringWithFormat:@"%C", c]];
                 }
             }
 		} else {
