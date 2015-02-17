@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = "MMPReactiveStompClient"
-  s.version          = "0.1.1"
+  s.version          = "0.1.2"
   s.summary          = "A reactive WebSocket/STOMP client based on ReactiveCocoa"
   s.description      = <<-DESC
                        MMPReactiveStompClient is a reactive WebSocket/STOMP client library based on ReactiveCocoa and SocketRocket. 
@@ -16,7 +16,7 @@ Pod::Spec.new do |s|
   s.social_media_url = 'https://twitter.com/purubo'
 
   s.platform         = :ios
-  s.ios.deployment_target = '5.0'
+  s.ios.deployment_target = '8.1'
   s.source_files     = 'Classes'
   s.dependency 'ReactiveCocoa'
   s.dependency 'SocketRocket'
