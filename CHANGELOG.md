@@ -1,5 +1,9 @@
 # MMPReactiveStompClient CHANGELOG
 
+## 0.1.3
+
+- (Oops!) Move target back to 7.0
+
 ## 0.1.2
 
 - Targeting 8.1 for use with newer ReactiveCocoa.
