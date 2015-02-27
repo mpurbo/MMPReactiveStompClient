@@ -61,8 +61,11 @@
  *  Reactive STOMP client based on ReactiveCocoa and SocketRocket.
  */
 @interface MMPReactiveStompClient : NSObject
-
+@property BOOL useSockJs;
 - (id)initWithURL:(NSURL *)url;
+
+- (id)initWithURLRequest:(NSURLRequest *)urlRequest;
+
 - (RACSignal *)open;
 - (void)close;
 
@@ -96,4 +99,7 @@
  */
 - (RACSignal *)stompMessagesFromDestination:(NSString *)destination;
 
+- (void)connect;
+
+- (void)send:(NSString *)destination message:(NSString *)message;
 @end
