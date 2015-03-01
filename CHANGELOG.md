@@ -1,5 +1,9 @@
 # MMPReactiveStompClient CHANGELOG
 
+## 0.2.0
+
+- Add SockJS support, connect and send. Credit: [Rahul Somasunderam](https://github.com/rahulsom)
+
 ## 0.1.3
 
 - (Oops!) Move target back to 7.0
