@@ -32,6 +32,7 @@
 #define kAckClient           @"client"
 #define kAckClientIndividual @"client-individual"
 
+@class SRWebSocket;
 @class RACSignal;
 
 @interface MMPStompFrame : NSObject
@@ -61,13 +62,23 @@
  *  Reactive STOMP client based on ReactiveCocoa and SocketRocket.
  */
 @interface MMPReactiveStompClient : NSObject
-@property BOOL useSockJs;
-- (id)initWithURL:(NSURL *)url;
 
+/** @name Creating */
+
+- (id)initWithURL:(NSURL *)url;
 - (id)initWithURLRequest:(NSURLRequest *)urlRequest;
+- (id)initWithSocket:(SRWebSocket *)socket;
+
+/** @name Opening and Closing */
 
 - (RACSignal *)open;
 - (void)close;
+
+/** @name Settings */
+
+- (instancetype)useSockJs;
+
+/** @name Signals */
 
 /**
  *  Signal for subscribing to raw web socket data frames.
@@ -99,7 +110,10 @@
  */
 - (RACSignal *)stompMessagesFromDestination:(NSString *)destination;
 
-- (void)connect;
+- (void)connectWithHeaders:(NSDictionary *)headers;
+- (void)sendMessage:(NSString *)message toDestination:(NSString *)destination;
+- (void)sendFrameWithCommand:(NSString *)command
+                     headers:(NSDictionary *)headers
+                        body:(NSString *)body;
 
-- (void)send:(NSString *)destination message:(NSString *)message;
 @end

@@ -88,6 +88,8 @@
 @property (nonatomic, strong) SRWebSocket *socket;
 @property (atomic, strong) RACSubject *socketSubject;
 
+@property (nonatomic, assign) BOOL useSockJsFlag;
+
 // MMPStompSubscription object for each destination
 @property (nonatomic, strong) NSMutableDictionary *subscriptions;
 
@@ -97,22 +99,20 @@
 
 @implementation MMPReactiveStompClient
 
-- (id)initWithURL:(NSURL *)url
-{
-    if (self = [super init]) {
-        self.socket = [[SRWebSocket alloc] initWithURL:url];
-        _socket.delegate = self;
-        self.socketSubject = nil;
-    }
-    return self;
+- (id)initWithURL:(NSURL *)url {
+    return [self initWithSocket:[[SRWebSocket alloc] initWithURL:url]];
 }
 
-- (id)initWithURLRequest:(NSURLRequest *)urlRequest
-{
+- (id)initWithURLRequest:(NSURLRequest *)urlRequest {
+    return [self initWithSocket:[[SRWebSocket alloc] initWithURLRequest:urlRequest]];
+}
+
+- (id)initWithSocket:(SRWebSocket *)socket {
     if (self = [super init]) {
-        self.socket = [[SRWebSocket alloc] initWithURLRequest:urlRequest];
+        self.socket = socket;
         _socket.delegate = self;
         self.socketSubject = nil;
+        self.useSockJsFlag = NO;
     }
     return self;
 }
@@ -126,9 +126,13 @@
     return self.socketSubject;
 }
 
-- (void)close
-{
+- (void)close {
     [_socket close];
+}
+
+- (instancetype)useSockJs {
+    self.useSockJsFlag = YES;
+    return self;
 }
 
 - (RACSignal *)webSocketData
@@ -182,7 +186,7 @@
                     subscription = [self subscribeTo:destination headers:nil];
                     [_subscriptions setObject:subscription forKey:destination];
                 } else {
-                    MMPRxSC_LOG(@"%d subscribed to STOMP destination: %@", subscription.subscribers, destination)
+                    MMPRxSC_LOG(@"%lu subscribed to STOMP destination: %@", (unsigned long)subscription.subscribers, destination)
                 }
                 subscription.subscribers++;
             }
@@ -209,7 +213,7 @@
                             }
                             [_subscriptions removeObjectForKey:destination];
                         } else {
-                            MMPRxSC_LOG(@"%d still subscribed to STOMP destination: %@", subscription.subscribers, destination)
+                            MMPRxSC_LOG(@"%lu still subscribed to STOMP destination: %@", (unsigned long)subscription.subscribers, destination)
                         }
                     } else {
                         // shouldn't happen
@@ -219,24 +223,19 @@
         }];
 }
 
-- (void)connect
-{
+- (void)connectWithHeaders:(NSDictionary *)headers {
     [self sendFrameWithCommand:kCommandConnect
-                       headers:@{
-                               @"accept-version": @"1.1,1.0",
-                               @"heart-beat": @"10000,10000",
-                       }
+                       headers:headers
                           body:@""];
 
 }
 
-- (void)send:(NSString *)destination message:(NSString *)message
-{
+- (void)sendMessage:(NSString *)message toDestination:(NSString *)destination {
     [self sendFrameWithCommand:kCommandSend
                        headers:@{
-                               @"destination": destination,
-                               @"content-length": @(message.length),
-                       }
+                                 kHeaderDestination: destination,
+                                 kHeaderContentLength: @(message.length),
+                                 }
                           body:message];
 }
 
@@ -259,7 +258,7 @@
     
     MMPStompFrame *frame = [[MMPStompFrame alloc] initWithCommand:command headers:headers body:body];
     MMPRxSC_LOG(@"Sending frame %@", frame)
-    NSString *data = self.useSockJs ? [frame toSockString] : [frame toString];
+    NSString *data = self.useSockJsFlag ? [frame toSockString] : [frame toString];
     [_socket send:data];
 }
 
@@ -284,7 +283,7 @@
 - (void)webSocket:(SRWebSocket *)webSocket didReceiveMessage:(id)message
 {
     NSString *extractedMessage = message;
-    if (self.useSockJs) {
+    if (self.useSockJsFlag) {
         extractedMessage = [extractedMessage stringByReplacingOccurrencesOfString:@"\\\\" withString:@"\\"];
         extractedMessage = [extractedMessage stringByReplacingOccurrencesOfString:@"\\\"" withString:@"\""];
         extractedMessage = [extractedMessage stringByReplacingOccurrencesOfString:@"\\n" withString:@"\n"];
