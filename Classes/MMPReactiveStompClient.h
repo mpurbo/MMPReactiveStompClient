@@ -32,6 +32,7 @@
 #define kAckClient           @"client"
 #define kAckClientIndividual @"client-individual"
 
+@class SRWebSocket;
 @class RACSignal;
 
 @interface MMPStompFrame : NSObject
@@ -62,9 +63,22 @@
  */
 @interface MMPReactiveStompClient : NSObject
 
+/** @name Creating */
+
 - (id)initWithURL:(NSURL *)url;
+- (id)initWithURLRequest:(NSURLRequest *)urlRequest;
+- (id)initWithSocket:(SRWebSocket *)socket;
+
+/** @name Opening and Closing */
+
 - (RACSignal *)open;
 - (void)close;
+
+/** @name Settings */
+
+- (instancetype)useSockJs;
+
+/** @name Signals */
 
 /**
  *  Signal for subscribing to raw web socket data frames.
@@ -95,5 +109,11 @@
  *  @return STOMP message signal coming from the specified destination.
  */
 - (RACSignal *)stompMessagesFromDestination:(NSString *)destination;
+
+- (void)connectWithHeaders:(NSDictionary *)headers;
+- (void)sendMessage:(NSString *)message toDestination:(NSString *)destination;
+- (void)sendFrameWithCommand:(NSString *)command
+                     headers:(NSDictionary *)headers
+                        body:(NSString *)body;
 
 @end

@@ -50,6 +50,7 @@
                  body:(NSString *)body;
 
 - (NSString *)toString;
+- (NSString *)toSockString;
 + (MMPStompFrame *)fromString:(NSString *)string;
 
 @end
@@ -87,6 +88,8 @@
 @property (nonatomic, strong) SRWebSocket *socket;
 @property (atomic, strong) RACSubject *socketSubject;
 
+@property (nonatomic, assign) BOOL useSockJsFlag;
+
 // MMPStompSubscription object for each destination
 @property (nonatomic, strong) NSMutableDictionary *subscriptions;
 
@@ -96,12 +99,20 @@
 
 @implementation MMPReactiveStompClient
 
-- (id)initWithURL:(NSURL *)url
-{
+- (id)initWithURL:(NSURL *)url {
+    return [self initWithSocket:[[SRWebSocket alloc] initWithURL:url]];
+}
+
+- (id)initWithURLRequest:(NSURLRequest *)urlRequest {
+    return [self initWithSocket:[[SRWebSocket alloc] initWithURLRequest:urlRequest]];
+}
+
+- (id)initWithSocket:(SRWebSocket *)socket {
     if (self = [super init]) {
-        self.socket = [[SRWebSocket alloc] initWithURL:url];
+        self.socket = socket;
         _socket.delegate = self;
         self.socketSubject = nil;
+        self.useSockJsFlag = NO;
     }
     return self;
 }
@@ -115,9 +126,13 @@
     return self.socketSubject;
 }
 
-- (void)close
-{
+- (void)close {
     [_socket close];
+}
+
+- (instancetype)useSockJs {
+    self.useSockJsFlag = YES;
+    return self;
 }
 
 - (RACSignal *)webSocketData
@@ -171,7 +186,7 @@
                     subscription = [self subscribeTo:destination headers:nil];
                     [_subscriptions setObject:subscription forKey:destination];
                 } else {
-                    MMPRxSC_LOG(@"%d subscribed to STOMP destination: %@", subscription.subscribers, destination)
+                    MMPRxSC_LOG(@"%lu subscribed to STOMP destination: %@", (unsigned long)subscription.subscribers, destination)
                 }
                 subscription.subscribers++;
             }
@@ -198,7 +213,7 @@
                             }
                             [_subscriptions removeObjectForKey:destination];
                         } else {
-                            MMPRxSC_LOG(@"%d still subscribed to STOMP destination: %@", subscription.subscribers, destination)
+                            MMPRxSC_LOG(@"%lu still subscribed to STOMP destination: %@", (unsigned long)subscription.subscribers, destination)
                         }
                     } else {
                         // shouldn't happen
@@ -206,6 +221,22 @@
                 }
             }];
         }];
+}
+
+- (void)connectWithHeaders:(NSDictionary *)headers {
+    [self sendFrameWithCommand:kCommandConnect
+                       headers:headers
+                          body:@""];
+
+}
+
+- (void)sendMessage:(NSString *)message toDestination:(NSString *)destination {
+    [self sendFrameWithCommand:kCommandSend
+                       headers:@{
+                                 kHeaderDestination: destination,
+                                 kHeaderContentLength: @(message.length),
+                                 }
+                          body:message];
 }
 
 #pragma mark Low-level STOMP operations
@@ -227,7 +258,8 @@
     
     MMPStompFrame *frame = [[MMPStompFrame alloc] initWithCommand:command headers:headers body:body];
     MMPRxSC_LOG(@"Sending frame %@", frame)
-    [_socket send:[frame toString]];
+    NSString *data = self.useSockJsFlag ? [frame toSockString] : [frame toString];
+    [_socket send:data];
 }
 
 - (MMPStompSubscription *)subscribeTo:(NSString *)destination
@@ -250,8 +282,16 @@
 
 - (void)webSocket:(SRWebSocket *)webSocket didReceiveMessage:(id)message
 {
-    MMPRxSC_LOG(@"received message: %@", message)
-    [self.socketSubject sendNext:message];
+    NSString *extractedMessage = message;
+    if (self.useSockJsFlag) {
+        extractedMessage = [extractedMessage stringByReplacingOccurrencesOfString:@"\\\\" withString:@"\\"];
+        extractedMessage = [extractedMessage stringByReplacingOccurrencesOfString:@"\\\"" withString:@"\""];
+        extractedMessage = [extractedMessage stringByReplacingOccurrencesOfString:@"\\n" withString:@"\n"];
+        extractedMessage = [extractedMessage stringByReplacingOccurrencesOfString:@"a[\"" withString:@""];
+        extractedMessage = [extractedMessage stringByReplacingOccurrencesOfString:@"\\u0000\"]" withString:@"\0"];
+    }
+    MMPRxSC_LOG(@"received message: %@", extractedMessage)
+    [self.socketSubject sendNext:extractedMessage];
 }
 
 - (void)webSocketDidOpen:(SRWebSocket *)webSocket
@@ -304,6 +344,14 @@
 	}
     [frame appendString:kNullChar];
     return frame;
+}
+
+-(NSString *)toSockString {
+    NSString *stompString = self.toString;
+    stompString = [stompString stringByReplacingOccurrencesOfString:@"\n" withString:@"\\n"];
+    stompString = [stompString stringByReplacingOccurrencesOfString:@"\0" withString:@"\\u0000"];
+    stompString = [stompString stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+    return [NSString stringWithFormat:@"[\"%@\"]", stompString];
 }
 
 + (MMPStompFrame *)fromString:(NSString *)string
