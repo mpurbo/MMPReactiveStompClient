@@ -18,7 +18,7 @@ it simply add the following line to your Podfile:
 ## Usage
 
 Following code shows how to subscribe to raw WebSocket signals:
-```objectivec
+```objc
 #import "MMPReactiveStompClient.h"
 #import <SocketRocket/SRWebSocket.h>
 #import <ReactiveCocoa/ReactiveCocoa.h>
@@ -45,7 +45,7 @@ stompClient = [[MMPReactiveStompClient alloc] initWithURL:[NSURL URLWithString:@
 ```
 
 Following samples shows how to get STOMP frames, messages, and subscribe to a specific channel:
-```objectivec
+```objc
 // subscribe to raw STOMP frames
 [[_stompClient stompFrames]
     subscribeNext:^(MMPStompFrame *frame) {
@@ -63,6 +63,45 @@ Following samples shows how to get STOMP frames, messages, and subscribe to a sp
     subscribeNext:^(MMPStompMessage *message) {
         NSLog(@"STOMP message received: body = %@", message.body);
     }];
+```
+
+## Settings
+
+You can chain-call settings method after initializing to specify custom settings. Following sections explain available settings.
+
+### SockJS
+
+When using SockJS server, use `useSockJs` as shown below:
+```objc
+MMPReactiveStompClient *stompClient = [[[MMPReactiveStompClient alloc]
+                                                                initWithURL:[NSURL URLWithString:@"ws://localhost:8080/stream/connect"]]
+                                                                useSockJs];
+```
+
+### Custom STOMP Subscription ID 
+
+By default each subscription to any STOMP destination will be given an ID with the following pattern:
+```
+sub-[running_number]
+```
+where `[running_number]` is automatically incremented number that starts from `0`. If you need to generate a custom ID, you can implement `MMPStompSubscriptionIdGenerator` protocol and pass the class to `subscriptionIdGenerator` method as shown in the following example:
+```objc
+// class implementing MMPStompSubscriptionIdGenerator protocol
+
+@interface GeocoreStompSubscriptionIdGenerator : NSObject<MMPStompSubscriptionIdGenerator>
+
+@property (nonatomic, assign) NSUInteger counter;
+
+@end
+
+@implementation GeocoreStompSubscriptionIdGenerator
+
+// implement method for generating next ID for new subscription
+- (NSString *)generateId {
+    return [NSString stringWithFormat:@"mycustomsubid-%lu", (unsigned long)++_counter];
+}
+
+@end
 ```
 
 ## Author

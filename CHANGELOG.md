@@ -1,5 +1,9 @@
 # MMPReactiveStompClient CHANGELOG
 
+## 0.2.1
+
+- Add support for custom STOMP subscription ID generator.
+
 ## 0.2.0
 
 - Add SockJS support, connect and send. Credit: [Rahul Somasunderam](https://github.com/rahulsom)
