@@ -82,13 +82,14 @@
 #pragma mark - STOMP client's privates
 
 @interface MMPReactiveStompClient()<SRWebSocketDelegate> {
-    int idGenerator;
+    int idCounter;
 }
 
 @property (nonatomic, strong) SRWebSocket *socket;
 @property (atomic, strong) RACSubject *socketSubject;
 
 @property (nonatomic, assign) BOOL useSockJsFlag;
+@property (nonatomic, strong) id<MMPStompSubscriptionIdGenerator> idGenerator;
 
 // MMPStompSubscription object for each destination
 @property (nonatomic, strong) NSMutableDictionary *subscriptions;
@@ -121,7 +122,7 @@
 {
     self.subscriptions = [NSMutableDictionary dictionary];
     self.socketSubject = [RACSubject subject];
-    idGenerator = 0;
+    idCounter = 0;
     [_socket open];
     return self.socketSubject;
 }
@@ -132,6 +133,11 @@
 
 - (instancetype)useSockJs {
     self.useSockJsFlag = YES;
+    return self;
+}
+
+- (instancetype)subscriptionIdGenerator:(id<MMPStompSubscriptionIdGenerator>)idGenerator {
+    self.idGenerator = idGenerator;
     return self;
 }
 
@@ -169,8 +175,11 @@
               }];
 }
 
-- (RACSignal *)stompMessagesFromDestination:(NSString *)destination
-{
+- (RACSignal *)stompMessagesFromDestination:(NSString *)destination {
+    return [self stompMessagesFromDestination:destination withHeaders:nil];
+}
+
+- (RACSignal *)stompMessagesFromDestination:(NSString *)destination withHeaders:(NSDictionary *)headers {
     @weakify(self)
     
     return [RACSignal
@@ -183,7 +192,7 @@
                 MMPStompSubscription *subscription = [_subscriptions objectForKey:destination];
                 if (!subscription) {
                     MMPRxSC_LOG(@"Subscribing to STOMP destination: %@", destination)
-                    subscription = [self subscribeTo:destination headers:nil];
+                    subscription = [self subscribeTo:destination headers:headers];
                     [_subscriptions setObject:subscription forKey:destination];
                 } else {
                     MMPRxSC_LOG(@"%lu subscribed to STOMP destination: %@", (unsigned long)subscription.subscribers, destination)
@@ -263,13 +272,19 @@
 }
 
 - (MMPStompSubscription *)subscribeTo:(NSString *)destination
-            headers:(NSDictionary *)headers
-{
+                              headers:(NSDictionary *)headers {
     NSMutableDictionary *subHeaders = [[NSMutableDictionary alloc] initWithDictionary:headers];
     subHeaders[kHeaderDestination] = destination;
     NSString *identifier = subHeaders[kHeaderID];
     if (!identifier) {
-        identifier = [NSString stringWithFormat:@"sub-%d", idGenerator++];
+        if (_idGenerator) {
+            identifier = [_idGenerator generateId];
+        } else {
+            // use default counter to generate id
+            @synchronized(self) {
+                identifier = [NSString stringWithFormat:@"sub-%d", idCounter++];
+            }
+        }
         subHeaders[kHeaderID] = identifier;
     }
     [self sendFrameWithCommand:kCommandSubscribe

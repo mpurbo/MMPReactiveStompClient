@@ -35,6 +35,12 @@
 @class SRWebSocket;
 @class RACSignal;
 
+@protocol MMPStompSubscriptionIdGenerator <NSObject>
+
+- (NSString *)generateId;
+
+@end
+
 @interface MMPStompFrame : NSObject
 
 @property (nonatomic, copy, readonly) NSString *command;
@@ -77,6 +83,7 @@
 /** @name Settings */
 
 - (instancetype)useSockJs;
+- (instancetype)subscriptionIdGenerator:(id<MMPStompSubscriptionIdGenerator>)idGenerator;
 
 /** @name Signals */
 
@@ -110,8 +117,23 @@
  */
 - (RACSignal *)stompMessagesFromDestination:(NSString *)destination;
 
+/**
+ *  Signal for subscribing with custom header to all STOMP messages coming from the specified subscription destination.
+ *
+ *  @param destination STOMP subscription destination
+ *  @param headers     Custom STOMP header for subscription
+ *
+ *  @return STOMP message signal coming from the specified destination.
+ */
+- (RACSignal *)stompMessagesFromDestination:(NSString *)destination withHeaders:(NSDictionary *)headers;
+
+/** @name STOMP operations */
+
 - (void)connectWithHeaders:(NSDictionary *)headers;
 - (void)sendMessage:(NSString *)message toDestination:(NSString *)destination;
+
+/** @name Low-level methods */
+
 - (void)sendFrameWithCommand:(NSString *)command
                      headers:(NSDictionary *)headers
                         body:(NSString *)body;
